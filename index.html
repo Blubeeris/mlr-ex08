@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1512">
+<title>Leaf Classifier — live camera</title>
+<style>
+  :root{
+    --bg:#0f1512; --panel:#18211c; --ink:#eaf2ec; --muted:#9db3a6;
+    --line:#2a3830; --accent:#5fd08a; --bar:#2f7d52; --warn:#ffcf6b; --bad:#ff8f7a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:16px 16px calc(28px + env(safe-area-inset-bottom));
+    background:var(--bg); color:var(--ink);
+    font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display:flex; flex-direction:column; align-items:center; gap:14px;
+  }
+  main{width:100%; max-width:480px; display:flex; flex-direction:column; gap:14px}
+  h1{font-size:22px; margin:0; letter-spacing:.2px}
+  h2{font-size:15px; margin:0 0 8px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.07em}
+  p{margin:0}
+  .sub{color:var(--muted); font-size:13px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:14px}
+
+  /* camera view: a square frame, object-fit:cover shows exactly the central square of the camera frame */
+  #stage{position:relative; width:100%; aspect-ratio:1/1; overflow:hidden;
+    background:#000; border-radius:14px; border:1px solid var(--line)}
+  #video,#still{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block}
+  #still{visibility:hidden}          #still.on{visibility:visible}
+  @supports not (aspect-ratio: 1 / 1){ #stage{height:0; padding-bottom:100%} }
+  .corner{position:absolute; width:26px; height:26px; border:3px solid var(--accent); opacity:.9; pointer-events:none}
+  .c1{top:10px;left:10px;border-right:0;border-bottom:0;border-radius:6px 0 0 0}
+  .c2{top:10px;right:10px;border-left:0;border-bottom:0;border-radius:0 6px 0 0}
+  .c3{bottom:10px;left:10px;border-right:0;border-top:0;border-radius:0 0 0 6px}
+  .c4{bottom:10px;right:10px;border-left:0;border-top:0;border-radius:0 0 6px 0}
+  #badge{position:absolute; left:10px; bottom:10px; padding:3px 9px; border-radius:999px; font-size:12px;
+    background:rgba(0,0,0,.55); color:#fff; letter-spacing:.04em}
+  #stageMsg{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    text-align:center; padding:20px; font-size:15px; color:#dbe7df; background:rgba(9,14,11,.72)}
+  #stageMsg.hidden{display:none}
+
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  button, .filebtn{
+    appearance:none; border:1px solid var(--line); background:#20302a; color:var(--ink);
+    padding:11px 14px; border-radius:11px; font-size:15px; font-weight:600; cursor:pointer; flex:1 1 auto
+  }
+  button:active,.filebtn:active{transform:translateY(1px)}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#08130c}
+  button:disabled,.filebtn{opacity:.55; cursor:default}
+  input[type=file]{position:absolute; width:1px; height:1px; opacity:0; overflow:hidden}
+
+  #top{font-size:26px; font-weight:700; margin-bottom:2px}
+  #top small{display:block; font-size:13px; font-weight:500; color:var(--muted)}
+  ul.bars{list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:9px}
+  ul.bars li{display:grid; grid-template-columns:1fr auto; gap:3px 8px}
+  .name{font-weight:600}
+  .val{font-variant-numeric:tabular-nums; color:var(--muted)}
+  .track{grid-column:1/3; height:9px; background:#101814; border-radius:999px; overflow:hidden; border:1px solid var(--line)}
+  .fill{height:100%; width:0%; background:var(--bar); border-radius:999px; transition:width .12s linear}
+  li.lead .fill{background:var(--accent)}
+  li.lead .val{color:var(--ink)}
+  #perf{margin-top:10px; font-size:12px; color:var(--muted)}
+
+  #selfcheck{white-space:pre-wrap; font-size:13px; font-variant-numeric:tabular-nums}
+  #selfcheck.pass{color:var(--accent)} #selfcheck.fail{color:var(--bad)}
+  .hint{font-size:13px; color:var(--muted)}
+  .err{color:var(--warn)}
+
+  /* QR block */
+  #qr{text-align:center}
+  #qrcanvas{image-rendering:pixelated; background:#fff; border-radius:10px; padding:8px; margin:6px auto 10px; display:block; max-width:100%}
+  #qr a{color:var(--accent); word-break:break-all; font-weight:600; text-decoration:underline}
+  #qrtext{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:var(--muted); word-break:break-all}
+  .caption{font-size:13px; color:var(--muted); margin-top:2px}
+  [hidden]{display:none !important}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>🍃 Leaf Classifier</h1>
+    <p class="sub" id="modelinfo">loading model description…</p>
+  </header>
+
+  <section class="card">
+    <h2>Camera</h2>
+    <div id="stage">
+      <video id="video" playsinline muted autoplay></video>
+      <img id="still" alt="selected photo">
+      <span class="corner c1"></span><span class="corner c2"></span>
+      <span class="corner c3"></span><span class="corner c4"></span>
+      <span id="badge">ready</span>
+      <div id="stageMsg">Tap <b>Start rear camera</b> to classify a leaf live.<br><span class="hint">Hold a leaf inside the corner marks.</span></div>
+    </div>
+    <p class="hint" style="margin-top:8px">Only the <b>central square</b> of the picture is sent to the model (the area between the corner marks).</p>
+    <div class="row" style="margin-top:10px">
+      <button id="startBtn" class="primary">Start rear camera</button>
+      <button id="stopBtn" hidden>Stop camera</button>
+      <label class="filebtn" for="file">Upload photo</label>
+      <input type="file" id="file" accept="image/*">
+    </div>
+    <p class="hint" id="camNote"></p>
+  </section>
+
+  <section class="card">
+    <h2>Predictions</h2>
+    <div id="top">—<small>no prediction yet</small></div>
+    <ul class="bars" id="bars"></ul>
+    <div id="perf"></div>
+  </section>
+
+  <section class="card">
+    <h2>Self-check</h2>
+    <div class="row">
+      <button id="checkBtn">Run self-check (check_image.jpg)</button>
+    </div>
+    <p class="hint">Runs the exact same browser pipeline on <code>check_image.jpg</code> and compares it with <code>check_expected.json</code>.</p>
+    <div id="selfcheck">not run yet</div>
+  </section>
+
+  <section class="card" id="qr">
+    <h2>Open this page on your phone</h2>
+    <p class="caption">Scan this QR code with the phone's camera:</p>
+    <canvas id="qrcanvas" width="256" height="256" role="img" aria-label="QR code linking to this page"></canvas>
+    <p><a id="qrlink" href="#">open link</a></p>
+    <p class="caption">Encoded URL: <span id="qrtext"></span></p>
+  </section>
+
+  <p class="sub">Runs entirely in your browser (ONNX Runtime Web + WebAssembly). Nothing is uploaded.</p>
+</main>
+
+<canvas id="work" hidden></canvas>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   Configuration — everything about the model comes from model_info.json
+   ========================================================================= */
+// Canonical deployed address of this page (GitHub Pages). Used for the QR code
+// and the link next to it, so the code always points at the public app.
+const APP_URL = "https://blubeeris.github.io/mlr-ex08/";
+
+// onnxruntime-web, WASM build. The model was exported by PyTorch with ONNX IR version 10,
+// which needs onnxruntime >= 1.19. 1 thread: no SharedArrayBuffer, so it also runs on
+// GitHub Pages (which sends no COOP/COEP headers) and in Safari on iOS.
+const ORT_BASES = [
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/",
+  "https://unpkg.com/onnxruntime-web@1.20.1/dist/"
+];
+
+const $ = (id) => document.getElementById(id);
+const video = $("video"), still = $("still"), stageMsg = $("stageMsg"), badge = $("badge");
+const work = $("work");
+const workCtx = work.getContext("2d", { willReadFrequently: true });
+
+let INFO = null;        // model_info.json contents
+let session = null;     // ort.InferenceSession
+let inputName = null;
+let captureStream = null;
+let live = false, busy = false, nextRunAt = 0, frames = 0, fpsT0 = 0;
+
+/* =========================================================================
+   Small helpers
+   ========================================================================= */
+function setBadge(text) { badge.textContent = text; }
+function showMsg(html) {                    // html = null hides the overlay on the camera tile
+  if (html == null) { stageMsg.classList.add("hidden"); return; }
+  stageMsg.innerHTML = html;
+  stageMsg.classList.remove("hidden");
+}
+function note(html) { $("camNote").innerHTML = html; }
+
+function softmax(logits) {
+  const m = Math.max.apply(null, logits);
+  const e = logits.map((v) => Math.exp(v - m));
+  const s = e.reduce((a, b) => a + b, 0);
+  return e.map((v) => v / s);
+}
+
+/* =========================================================================
+   Preprocessing — central square -> resize -> 0..1 -> per-channel (x-mean)/std
+   Output: Float32Array in CHW order, shaped [1, 3, size, size]
+   ========================================================================= */
+function tensorFrom(source, srcW, srcH) {
+  const size = INFO.input_size;
+  if (work.width !== size || work.height !== size) { work.width = size; work.height = size; }
+
+  const side = Math.min(srcW, srcH);              // central square of the frame
+  const sx = (srcW - side) / 2, sy = (srcH - side) / 2;
+
+  workCtx.imageSmoothingEnabled = true;
+  if ("imageSmoothingQuality" in workCtx) workCtx.imageSmoothingQuality = "high";
+  workCtx.clearRect(0, 0, size, size);
+  workCtx.drawImage(source, sx, sy, side, side, 0, 0, size, size);
+
+  const px = workCtx.getImageData(0, 0, size, size).data;   // RGBA, 0..255
+  const plane = size * size;
+  const out = new Float32Array(3 * plane);
+  const mean = INFO.mean, std = INFO.std;
+  for (let i = 0; i < plane; i++) {
+    const o = i * 4;
+    out[i]              = (px[o]     / 255 - mean[0]) / std[0];
+    out[plane + i]      = (px[o + 1] / 255 - mean[1]) / std[1];
+    out[2 * plane + i]  = (px[o + 2] / 255 - mean[2]) / std[2];
+    // alpha is ignored; JPEG/video frames are opaque
+  }
+  return new window.ort.Tensor("float32", out, [1, 3, size, size]);
+}
+
+async function classify(source, srcW, srcH) {
+  const t = tensorFrom(source, srcW, srcH);
+  const feeds = {}; feeds[inputName] = t;
+  const results = await session.run(feeds);
+  const out = results[session.outputNames[0]];
+  return softmax(Array.prototype.slice.call(out.data));
+}
+
+/* =========================================================================
+   Results display
+   ========================================================================= */
+function buildBars() {
+  const ul = $("bars");
+  ul.innerHTML = "";
+  INFO.classes.forEach((cls) => {
+    const li = document.createElement("li");
+    li.innerHTML = '<span class="name"></span><span class="val">—</span><div class="track"><div class="fill"></div></div>';
+    li.querySelector(".name").textContent = cls;
+    ul.appendChild(li);
+  });
+}
+
+function render(probs, ms) {
+  const items = $("bars").children;
+  let best = 0;
+  for (let i = 1; i < probs.length; i++) if (probs[i] > probs[best]) best = i;
+
+  for (let i = 0; i < items.length; i++) {
+    const li = items[i], p = probs[i] || 0;
+    li.querySelector(".fill").style.width = (p * 100).toFixed(1) + "%";
+    li.querySelector(".val").textContent = (p * 100).toFixed(p < 0.001 ? 4 : 2) + "%";
+    li.classList.toggle("lead", i === best);
+  }
+  $("top").innerHTML = "";
+  $("top").append(document.createTextNode(INFO.classes[best]));
+  const small = document.createElement("small");
+  small.textContent = (probs[best] * 100).toFixed(2) + "% confidence";
+  $("top").appendChild(small);
+
+  if (ms != null) {
+    if (live) {
+      frames++;
+      const now = performance.now();
+      if (!fpsT0) fpsT0 = now;
+      const secs = (now - fpsT0) / 1000;
+      const fps = secs > 0.5 ? (frames / secs) : 0;
+      $("perf").textContent = secs > 0.5
+        ? fps.toFixed(1) + " inferences/s · " + ms.toFixed(0) + " ms per frame"
+        : ms.toFixed(0) + " ms per frame";
+    } else {
+      $("perf").textContent = ms.toFixed(0) + " ms";
+    }
+  }
+}
+
+/* =========================================================================
+   Live camera loop
+   ========================================================================= */
+const MIN_INTERVAL_MS = 200;   // ~5 inferences/s, comfortable on a phone
+
+function loop(ts) {
+  if (!live) return;
+  requestAnimationFrame(loop);
+  if (busy || ts < nextRunAt) return;
+  if (video.readyState < 2 || !video.videoWidth) return;
+  busy = true; nextRunAt = ts + MIN_INTERVAL_MS;
+  const t0 = performance.now();
+  classify(video, video.videoWidth, video.videoHeight)
+    .then((p) => render(p, performance.now() - t0))
+    .catch((e) => { note('<span class="err">inference error: ' + e.message + "</span>"); live = false; })
+    .then(() => { busy = false; });
+}
+
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showMsg("This browser has no camera API.<br><span class='hint'>Use <b>Upload photo</b>, and open the page over https.</span>");
+    setBadge("no camera API");
+    note('<span class="err">getUserMedia is not available here.</span>');
+    return;
+  }
+  showMsg("asking for camera permission…");
+  setBadge("permission?");
+  $("startBtn").disabled = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: "environment" },
+        width:  { ideal: 1280 },
+        height: { ideal: 960 }
+      }
+    });
+    captureStream = stream;
+    still.classList.remove("on");
+    still.removeAttribute("src");
+    video.srcObject = stream;
+    video.muted = true;
+    video.setAttribute("playsinline", "");
+    await video.play();
+    live = true; frames = 0; fpsT0 = 0; nextRunAt = 0;
+    showMsg(null);
+    setBadge("live");
+    $("startBtn").hidden = true; $("startBtn").disabled = false; $("stopBtn").hidden = false;
+
+    const st = (stream.getVideoTracks()[0] || {}).getSettings
+      ? stream.getVideoTracks()[0].getSettings() : {};
+    const back = !st.facingMode || st.facingMode === "environment" || st.facingMode === "back";
+    note("Camera " + (video.videoWidth ? video.videoWidth + "×" + video.videoHeight : "") +
+         (back ? " · rear camera" : " · <span class='err'>front camera in use (no rear camera found)</span>") +
+         " · model input " + INFO.input_size + "×" + INFO.input_size + ".");
+    requestAnimationFrame(loop);
+  } catch (e) {
+    $("startBtn").disabled = false;
+    let why = e && e.name ? e.name : "error";
+    let help = "";
+    if (why === "NotAllowedError" || why === "SecurityError") {
+      help = "Camera permission was blocked. Allow it for this site in your browser settings (iOS: Settings → Safari → Camera, or the “aA” menu in the address bar), then tap again.";
+    } else if (why === "NotFoundError" || why === "OverconstrainedError" || why === "NotReadableError") {
+      help = "No usable camera was found for this page. You can still classify a picture with <b>Upload photo</b>.";
+    } else {
+      help = String(e && e.message || e);
+    }
+    showMsg("Camera unavailable (" + why + ").<br><span class='hint'>" + help + "</span>");
+    setBadge("no camera");
+    note('<span class="err">' + help + "</span>");
+  }
+}
+
+function stopCamera(msgHtml) {              // msgHtml: overlay text to show afterwards, or null for none
+  live = false; busy = false;
+  if (captureStream) captureStream.getTracks().forEach((t) => t.stop());
+  captureStream = null;
+  video.srcObject = null;
+  $("stopBtn").hidden = true; $("startBtn").hidden = false; $("startBtn").disabled = false;
+  setBadge("stopped");
+  showMsg(msgHtml === undefined
+    ? "Camera stopped.<br><span class='hint'>Tap <b>Start rear camera</b> to resume, or upload a photo.</span>"
+    : msgHtml);
+}
+
+/* =========================================================================
+   Photo upload / image file -> same pipeline
+   ========================================================================= */
+function loadImageFile(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = async function () {
+    stopCamera(null);                       // the photo replaces the live camera view
+    still.src = url;
+    still.classList.add("on");
+    setBadge("photo");
+    note('Classifying <b>' + file.name + "</b> (" + img.naturalWidth + "×" + img.naturalHeight + ").");
+    const t0 = performance.now();
+    try {
+      render(await classify(img, img.naturalWidth, img.naturalHeight), performance.now() - t0);
+    } catch (e) {
+      note('<span class="err">inference error: ' + e.message + "</span>");
+    }
+  };
+  img.onerror = function () { note('<span class="err">could not read that image.</span>'); };
+  img.src = url;
+}
+
+/* =========================================================================
+   Self-check against check_expected.json
+   ========================================================================= */
+async function selfCheck() {
+  const el = $("selfcheck");
+  el.className = ""; el.textContent = "running…";
+  try {
+    const [expected, img] = await Promise.all([
+      fetch("check_expected.json").then((r) => r.json()),
+      new Promise((res, rej) => {
+        const im = new Image();
+        im.onload = () => res(im); im.onerror = () => rej(new Error("cannot load check_image.jpg"));
+        im.src = "check_image.jpg";
+      })
+    ]);
+    const probs = await classify(img, img.naturalWidth, img.naturalHeight);
+    let maxErr = 0, compared = 0, lines = [];
+    INFO.classes.forEach((c, i) => {
+      const exp = expected[c];
+      if (exp == null) { lines.push(c + ": not in check_expected.json"); return; }
+      compared++;
+      const err = Math.abs(probs[i] - exp);
+      maxErr = Math.max(maxErr, err);
+      lines.push(c.padEnd(9) + " got " + probs[i].toFixed(6).padStart(9) +
+                 "   expected " + exp.toFixed(6).padStart(9) + "   |diff| " + err.toExponential(2));
+    });
+    const ok = compared === INFO.classes.length && maxErr < 1e-3;   // every class must be covered
+    el.className = ok ? "pass" : "fail";
+    el.textContent = (ok ? "PASS" : "FAIL") + " — largest difference from check_expected.json: " +
+                     maxErr.toExponential(2) + "\n" + lines.join("\n");
+    document.documentElement.dataset.selfcheck = ok ? "PASS" : "FAIL";
+  } catch (e) {
+    el.className = "fail";
+    el.textContent = "FAIL — " + (e && e.message ? e.message : e);
+    document.documentElement.dataset.selfcheck = "FAIL";
+  }
+}
+
+/* =========================================================================
+   QR code encoder (byte mode, error-correction level M, versions 1–10).
+   Generated here in the page — no third-party QR image service.
+   ========================================================================= */
+const QR = (function () {
+  // version -> [EC codewords per block, [[blockCount, dataCodewords], ...], total data codewords]
+  const RS = {
+    1:  [10, [[1, 16]], 16],     2: [16, [[1, 28]], 28],      3: [26, [[1, 44]], 44],
+    4:  [18, [[2, 32]], 64],     5: [24, [[2, 43]], 86],      6: [16, [[4, 27]], 108],
+    7:  [18, [[4, 31]], 124],    8: [22, [[2, 38], [2, 39]], 154],
+    9:  [22, [[3, 36], [2, 37]], 182], 10: [26, [[4, 43], [1, 44]], 216]
+  };
+  const AP = { 1: [], 2: [6, 18], 3: [6, 22], 4: [6, 26], 5: [6, 30], 6: [6, 34],
+               7: [6, 22, 38], 8: [6, 24, 42], 9: [6, 26, 46], 10: [6, 28, 50] };
+  const MAXV = 10;
+
+  // GF(256) tables, primitive polynomial 0x11D
+  const EXP = new Uint8Array(512), LOG = new Uint8Array(256);
+  for (let i = 0, x = 1; i < 255; i++) { EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
+  for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255];
+  const gmul = (a, b) => (a === 0 || b === 0 ? 0 : EXP[LOG[a] + LOG[b]]);
+
+  function genPoly(n) {                    // generator polynomial, highest degree first
+    let p = [1];
+    for (let i = 0; i < n; i++) {
+      const a = EXP[i], q = new Array(p.length + 1).fill(0);
+      for (let k = 0; k <= p.length; k++) {
+        if (k < p.length) q[k] ^= p[k];
+        if (k > 0) q[k] ^= gmul(p[k - 1], a);
+      }
+      p = q;
+    }
+    return p;
+  }
+  function ecBytes(data, n) {
+    const g = genPoly(n), buf = new Uint8Array(data.length + n);
+    buf.set(data);
+    for (let i = 0; i < data.length; i++) {
+      const f = buf[i];
+      if (!f) continue;
+      for (let j = 1; j < g.length; j++) buf[i + j] ^= gmul(g[j], f);
+    }
+    return buf.subarray(data.length);
+  }
+
+  function bchFormat(data5) {              // 5 -> 15 format bits, then XOR mask 0x5412
+    let d = data5 << 10;
+    for (let i = 14; i >= 10; i--) if ((d >> i) & 1) d ^= 0x537 << (i - 10);
+    return ((data5 << 10) | d) ^ 0x5412;
+  }
+  function bchVersion(v) {                 // version info, 18 bits (versions >= 7)
+    let d = v << 12;
+    for (let i = 17; i >= 12; i--) if ((d >> i) & 1) d ^= 0x1f25 << (i - 12);
+    return (v << 12) | d;
+  }
+
+  function maskFn(pat, i, j) {             // i = row, j = column
+    switch (pat) {
+      case 0: return (i + j) % 2 === 0;
+      case 1: return i % 2 === 0;
+      case 2: return j % 3 === 0;
+      case 3: return (i + j) % 3 === 0;
+      case 4: return (Math.floor(i / 2) + Math.floor(j / 3)) % 2 === 0;
+      case 5: return ((i * j) % 2) + ((i * j) % 3) === 0;
+      case 6: return (((i * j) % 2) + ((i * j) % 3)) % 2 === 0;
+      default: return (((i * j) % 3) + ((i + j) % 2)) % 2 === 0;
+    }
+  }
+
+  function pickVersion(byteLen) {
+    for (let v = 1; v <= MAXV; v++) {
+      const cap = Math.floor((RS[v][2] * 8 - 4 - (v < 10 ? 8 : 16)) / 8);
+      if (byteLen <= cap) return v;
+    }
+    throw new Error("text too long for this QR encoder (max 214 bytes)");
+  }
+
+  function dataCodewords(text, version) {
+    const bytes = new TextEncoder().encode(text);
+    const total = RS[version][2];
+    const bits = [];
+    const push = (val, n) => { for (let k = n - 1; k >= 0; k--) bits.push((val >>> k) & 1); };
+    push(0b0100, 4);                                   // byte mode
+    push(bytes.length, version < 10 ? 8 : 16);         // character count
+    bytes.forEach((b) => push(b, 8));
+    const capacity = total * 8;
+    for (let i = 0; i < 4 && bits.length < capacity; i++) bits.push(0);   // terminator
+    while (bits.length % 8) bits.push(0);                                 // byte align
+    const cw = new Uint8Array(total);
+    for (let i = 0; i < bits.length / 8; i++) {
+      let b = 0; for (let k = 0; k < 8; k++) b = (b << 1) | bits[i * 8 + k];
+      cw[i] = b;
+    }
+    for (let i = bits.length / 8, pad = 0xec; i < total; i++, pad ^= 0xec ^ 0x11) cw[i] = pad;
+    return cw;
+  }
+
+  function interleave(cw, version) {
+    const ecPer = RS[version][0];
+    const blocks = [], dataBlocks = [], ecBlocks = [];
+    let off = 0;
+    RS[version][1].forEach(([count, dataLen]) => {
+      for (let b = 0; b < count; b++) {
+        const d = cw.subarray(off, off + dataLen); off += dataLen;
+        dataBlocks.push(d); ecBlocks.push(ecBytes(d, ecPer));
+      }
+    });
+    const out = [];
+    const maxD = Math.max.apply(null, dataBlocks.map((b) => b.length));
+    for (let i = 0; i < maxD; i++) dataBlocks.forEach((b) => { if (i < b.length) out.push(b[i]); });
+    for (let i = 0; i < ecPer; i++) ecBlocks.forEach((b) => out.push(b[i]));
+    return Uint8Array.from(out);
+  }
+
+  function newGrid(size) {
+    return {
+      mod: Array.from({ length: size }, () => new Uint8Array(size)),
+      fn:  Array.from({ length: size }, () => new Uint8Array(size)),
+      set(r, c, v) { this.mod[r][c] = v ? 1 : 0; this.fn[r][c] = 1; }
+    };
+  }
+
+  function drawFunctionPatterns(g, size, version) {
+    const finder = (r0, c0) => {
+      for (let dr = -1; dr <= 7; dr++) for (let dc = -1; dc <= 7; dc++) {
+        const r = r0 + dr, c = c0 + dc;
+        if (r < 0 || r >= size || c < 0 || c >= size) continue;
+        const inRing = (dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6) &&
+          (dr === 0 || dr === 6 || dc === 0 || dc === 6 || (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4));
+        g.set(r, c, inRing ? 1 : 0);       // 7x7 pattern, plus separators (0)
+      }
+    };
+    finder(0, 0); finder(size - 7, 0); finder(0, size - 7);
+
+    for (let i = 8; i < size - 8; i++) {   // timing patterns
+      const v = (i % 2 === 0) ? 1 : 0;
+      g.set(6, i, v); g.set(i, 6, v);
+    }
+    const ap = AP[version], n = ap.length; // alignment patterns
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      if ((i === 0 && j === 0) || (i === 0 && j === n - 1) || (i === n - 1 && j === 0)) continue;
+      for (let dr = -2; dr <= 2; dr++) for (let dc = -2; dc <= 2; dc++) {
+        g.set(ap[i] + dr, ap[j] + dc, (Math.max(Math.abs(dr), Math.abs(dc)) !== 1) ? 1 : 0);
+      }
+    }
+    for (let i = 0; i < 9; i++) {          // reserve format areas
+      if (i !== 6) { g.fn[8][i] = 1; g.fn[i][8] = 1; }
+    }
+    for (let i = 0; i < 8; i++) { g.fn[8][size - 1 - i] = 1; g.fn[size - 1 - i][8] = 1; }
+    g.fn[size - 8][8] = 1;                 // dark module
+    if (version >= 7) {                    // reserve version info blocks
+      for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) {
+        g.fn[i][size - 11 + j] = 1; g.fn[size - 11 + j][i] = 1;
+      }
+    }
+  }
+
+  function placeFormat(g, size, mask) {
+    const bits = bchFormat((0 << 3) | mask);   // EC level M = 0b00
+    for (let i = 0; i < 15; i++) {
+      const b = (bits >> i) & 1;
+      if (i < 6) g.mod[i][8] = b;
+      else if (i < 8) g.mod[i + 1][8] = b;
+      else g.mod[size - 15 + i][8] = b;
+      if (i < 8) g.mod[8][size - 1 - i] = b;
+      else if (i < 9) g.mod[8][15 - i - 1 + 1] = b;
+      else g.mod[8][15 - i - 1] = b;
+    }
+    g.mod[size - 8][8] = 1;                     // always-dark module
+  }
+
+  function placeVersion(g, size, version) {
+    if (version < 7) return;
+    const bits = bchVersion(version);
+    for (let i = 0; i < 18; i++) {
+      const b = (bits >> i) & 1;
+      const r = Math.floor(i / 3), c = i % 3;
+      g.mod[r][size - 11 + c] = b;
+      g.mod[size - 11 + c][r] = b;
+    }
+  }
+
+  function mapData(g, size, codewords, mask) {
+    let dir = -1, row = size - 1, bit = 7, idx = 0;
+    for (let col = size - 1; col > 0; col -= 2) {
+      if (col === 6) col--;
+      for (;;) {
+        for (let k = 0; k < 2; k++) {
+          const c = col - k;
+          if (!g.fn[row][c]) {
+            let dark = false;
+            if (idx < codewords.length) dark = ((codewords[idx] >>> bit) & 1) === 1;
+            if (maskFn(mask, row, c)) dark = !dark;
+            g.mod[row][c] = dark ? 1 : 0;
+            if (bit-- === 0) { idx++; bit = 7; }
+          }
+        }
+        row += dir;
+        if (row < 0 || row >= size) { row -= dir; dir = -dir; break; }
+      }
+    }
+  }
+
+  function penalty(g, size) {                   // ISO 18004 lost-point rules
+    const m = g.mod;
+    let score = 0;
+    const runs = (get) => {
+      for (let a = 0; a < size; a++) {
+        let run = 1;
+        for (let b = 1; b <= size; b++) {
+          const same = b < size && get(a, b) === get(a, b - 1);
+          if (same) run++;
+          else { if (run >= 5) score += 3 + (run - 5); run = 1; }
+        }
+      }
+    };
+    runs((a, b) => m[a][b]);   // rows
+    runs((a, b) => m[b][a]);   // columns
+    for (let r = 0; r < size - 1; r++) for (let c = 0; c < size - 1; c++) {     // 2x2 blocks
+      const v = m[r][c];
+      if (v === m[r][c + 1] && v === m[r + 1][c] && v === m[r + 1][c + 1]) score += 3;
+    }
+    const P1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];                                // 1011101 + 4 light
+    const P2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
+    const has = (get, a, b) => P1.every((v, k) => get(a, b + k) === v) || P2.every((v, k) => get(a, b + k) === v);
+    for (let a = 0; a < size; a++) for (let b = 0; b + 11 <= size; b++) {
+      if (has((x, y) => m[x][y], a, b)) score += 40;
+      if (has((x, y) => m[y][x], a, b)) score += 40;
+    }
+    let dark = 0;                                                                  // balance
+    for (let r = 0; r < size; r++) for (let c = 0; c < size; c++) dark += m[r][c];
+    const pct = (dark * 100) / (size * size);
+    score += Math.floor(Math.abs(pct - 50) / 5) * 10;
+    return score;
+  }
+
+  function encode(text) {
+    const version = pickVersion(new TextEncoder().encode(text).length);
+    const size = 17 + version * 4;
+    const codewords = interleave(dataCodewords(text, version), version);
+    let best = null;
+    for (let mask = 0; mask < 8; mask++) {
+      const g = newGrid(size);
+      drawFunctionPatterns(g, size, version);
+      placeVersion(g, size, version);
+      mapData(g, size, codewords, mask);
+      placeFormat(g, size, mask);
+      const p = penalty(g, size);
+      if (!best || p < best.p) best = { p, g };
+    }
+    return { size, version, mod: best.g.mod };
+  }
+
+  function draw(canvas, text) {
+    const qr = encode(text);
+    const quiet = 4;                                   // light quiet zone, as the spec asks for
+    const modules = qr.size + quiet * 2;
+    const scale = Math.max(3, Math.min(10, Math.floor(200 / modules)));
+    const px = modules * scale;                        // whole device pixels per module -> crisp edges
+    canvas.width = px; canvas.height = px;
+    canvas.style.width = px + "px"; canvas.style.height = px + "px";
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, px, px);
+    ctx.fillStyle = "#000";
+    for (let r = 0; r < qr.size; r++) for (let c = 0; c < qr.size; c++) {
+      if (qr.mod[r][c]) ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+    }
+    return qr;
+  }
+
+  return { encode, draw };
+})();
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src; s.async = true;
+    s.onload = res; s.onerror = () => rej(new Error("failed to load " + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function loadOrt() {
+  let lastErr;
+  for (const base of ORT_BASES) {
+    try {
+      await loadScript(base + "ort.min.js");
+      if (!window.ort) throw new Error("onnxruntime-web did not define a global");
+      window.ort.env.wasm.numThreads = 1;      // no SharedArrayBuffer -> works on GitHub Pages & Safari
+      window.ort.env.wasm.proxy = false;
+      window.ort.env.wasm.wasmPaths = base;
+      return base;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("could not load onnxruntime-web");
+}
+
+function simdSupported() {
+  try {
+    return WebAssembly.validate(new Uint8Array([
+      0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0,
+      10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11
+    ]));
+  } catch (e) { return false; }
+}
+
+async function boot() {
+  // the QR block is independent of the model: render it first, before anything can fail
+  try {
+    QR.draw($("qrcanvas"), APP_URL);
+    $("qrlink").href = APP_URL;
+    $("qrlink").textContent = APP_URL;
+    $("qrtext").textContent = APP_URL;
+    document.documentElement.dataset.qrUrl = APP_URL;
+  } catch (e) {
+    $("qrtext").textContent = "QR generation failed: " + e.message;
+  }
+
+  if (!simdSupported()) {
+    $("modelinfo").innerHTML = '<span class="err">This browser cannot run the model: it lacks WebAssembly SIMD ' +
+      "(needs iOS/Safari 16.4+, Chrome 91+, Firefox 85+).</span>";
+    $("selfcheck").textContent = "FAIL — browser has no WebAssembly SIMD support";
+    $("selfcheck").className = "fail";
+    return;
+  }
+
+  try {
+    setBadge("loading");
+    showMsg("Loading the model — first run downloads about 17 MB (6 MB model + 11 MB WebAssembly runtime), then it is cached.<br><span class='hint'>This only happens once per browser.</span>");
+    INFO = await fetch("model_info.json").then((r) => r.json());
+    $("modelinfo").textContent = INFO.classes.length + " classes: " + INFO.classes.join(", ") +
+      " · input " + INFO.input_size + "×" + INFO.input_size + " RGB, mean " + INFO.mean.join("/") +
+      ", std " + INFO.std.join("/");
+    buildBars();
+
+    await loadOrt();
+    const t0 = performance.now();
+    session = await window.ort.InferenceSession.create("leaf_model.onnx", {
+      graphOptimizationLevel: "all"
+    });
+    inputName = session.inputNames[0];
+    const io = session.inputMetadata && session.inputMetadata[inputName];   // not in every ort version
+    work.width = INFO.input_size; work.height = INFO.input_size;
+    $("perf").textContent = "model loaded in " + (performance.now() - t0).toFixed(0) + " ms · input '" +
+      inputName + "' " + JSON.stringify(io ? io.dims : [1, 3, INFO.input_size, INFO.input_size]) +
+      " · 1 thread";
+    setBadge("ready");
+    showMsg("Tap <b>Start rear camera</b> to classify a leaf live.<br><span class='hint'>Hold a leaf inside the corner marks.</span>");
+    $("startBtn").disabled = false;
+    $("checkBtn").disabled = false;
+
+    if (new URLSearchParams(location.search).has("selfcheck")) await selfCheck();
+  } catch (e) {
+    console.error(e);
+    setBadge("error");
+    showMsg('<span class="err">Could not start: ' + (e && e.message ? e.message : e) + "</span>");
+    $("modelinfo").innerHTML = '<span class="err">model failed to load — see the message on the camera tile.</span>';
+    $("selfcheck").textContent = "FAIL — " + (e && e.message ? e.message : e);
+    $("selfcheck").className = "fail";
+  }
+}
+
+$("startBtn").disabled = true; $("checkBtn").disabled = true;
+$("startBtn").addEventListener("click", startCamera);
+$("stopBtn").addEventListener("click", () => stopCamera());
+$("checkBtn").addEventListener("click", selfCheck);
+$("file").addEventListener("change", (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if (f) loadImageFile(f);
+  ev.target.value = "";
+});
+// Pausing the loop when the tab is hidden saves the phone's battery.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { if (live) { live = false; setBadge("paused"); } }
+  else if (!live && captureStream) { live = true; setBadge("live"); requestAnimationFrame(loop); }
+});
+
+boot();
+</script>
+</body>
+</html>
