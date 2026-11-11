@@ -70,6 +70,8 @@
 
   /* QR block */
   #qr{text-align:center}
+  #qr .qrrow{display:flex; gap:18px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:4px}
+  #qr .qrside{text-align:left; max-width:230px}
   #qrcanvas{image-rendering:pixelated; background:#fff; border-radius:10px; padding:8px; margin:6px auto 10px; display:block; max-width:100%}
   #qr a{color:var(--accent); word-break:break-all; font-weight:600; text-decoration:underline}
   #qrtext{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; color:var(--muted); word-break:break-all}
@@ -122,10 +124,14 @@
 
   <section class="card" id="qr">
     <h2>Open this page on your phone</h2>
-    <p class="caption">Scan this QR code with the phone's camera:</p>
-    <canvas id="qrcanvas" width="256" height="256" role="img" aria-label="QR code linking to this page"></canvas>
-    <p><a id="qrlink" href="#">open link</a></p>
-    <p class="caption">Encoded URL: <span id="qrtext"></span></p>
+    <div class="qrrow">
+      <canvas id="qrcanvas" role="img" aria-label="QR code that opens this page"></canvas>
+      <div class="qrside">
+        <p class="caption">Scan this code with the phone's camera, or tap the link:</p>
+        <p><a id="qrlink" href="https://blubeeris.github.io/mlr-ex08/">https://blubeeris.github.io/mlr-ex08/</a></p>
+      </div>
+    </div>
+    <p class="caption">Encoded URL: <span id="qrtext">https://blubeeris.github.io/mlr-ex08/</span></p>
   </section>
 
   <p class="sub">Runs entirely in your browser (ONNX Runtime Web + WebAssembly). Nothing is uploaded.</p>
