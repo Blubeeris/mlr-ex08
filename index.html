@@ -35,10 +35,11 @@
   .c2{top:10px;right:10px;border-left:0;border-bottom:0;border-radius:0 6px 0 0}
   .c3{bottom:10px;left:10px;border-right:0;border-top:0;border-radius:0 0 0 6px}
   .c4{bottom:10px;right:10px;border-left:0;border-top:0;border-radius:0 0 6px 0}
-  #badge{position:absolute; left:10px; bottom:10px; padding:3px 9px; border-radius:999px; font-size:12px;
-    background:rgba(0,0,0,.55); color:#fff; letter-spacing:.04em}
+  #badge{position:absolute; left:50%; transform:translateX(-50%); bottom:14px; padding:3px 11px; border-radius:999px;
+    font-size:12px; background:rgba(0,0,0,.6); color:#fff; letter-spacing:.04em}
   #stageMsg{position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
     text-align:center; padding:20px; font-size:15px; color:#dbe7df; background:rgba(9,14,11,.72)}
+  #stageMsg>div{max-width:34ch; margin:auto}
   #stageMsg.hidden{display:none}
 
   .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
@@ -94,7 +95,7 @@
       <span class="corner c1"></span><span class="corner c2"></span>
       <span class="corner c3"></span><span class="corner c4"></span>
       <span id="badge">ready</span>
-      <div id="stageMsg">Tap <b>Start rear camera</b> to classify a leaf live.<br><span class="hint">Hold a leaf inside the corner marks.</span></div>
+      <div id="stageMsg"><div>Tap <b>Start rear camera</b> to classify a leaf live.<br><span class="hint">Hold a leaf inside the corner marks.</span></div></div>
     </div>
     <p class="hint" style="margin-top:8px">Only the <b>central square</b> of the picture is sent to the model (the area between the corner marks).</p>
     <div class="row" style="margin-top:10px">
@@ -174,7 +175,7 @@ let live = false, busy = false, nextRunAt = 0, frames = 0, fpsT0 = 0;
 function setBadge(text) { badge.textContent = text; }
 function showMsg(html) {                    // html = null hides the overlay on the camera tile
   if (html == null) { stageMsg.classList.add("hidden"); return; }
-  stageMsg.innerHTML = html;
+  stageMsg.innerHTML = "<div>" + html + "</div>";   // one block, so the flex centreing does not split the text
   stageMsg.classList.remove("hidden");
 }
 function note(html) { $("camNote").innerHTML = html; }
